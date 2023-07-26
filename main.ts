@@ -11,7 +11,7 @@ let prisma = new PrismaClient();
 
 // Function to read the ceps.bin file and get the biggest zip code
 async function getStartingZip() {
-  return 2110030
+  return 2300000
 }
 
 async function fetchFromApi(cep: number, retries: number) {
@@ -40,7 +40,6 @@ async function fetchFromApi(cep: number, retries: number) {
   }
 }
 
-// Add to queue for search
 async function addToSearchQueue() {
   let cep = await getStartingZip();
   console.log("Starting", cep);
@@ -54,6 +53,8 @@ async function addToSearchQueue() {
       }
       cep++;
       setImmediate(addNextCepToQueue); // Call the next CEP in the next iteration of the event loop
+    } else {
+      channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ end: true })));
     }
   };
 
@@ -61,62 +62,62 @@ async function addToSearchQueue() {
   addNextCepToQueue();
 }
 
-
-// Consume the search queue, fetch data from API and add to write queue
 async function consumeSearchQueue() {
   const CONSUMER_COUNT = 10;
 
   for (let i = 0; i < CONSUMER_COUNT; i++) {
     channel.consume('searchQueue', async (message: any) => {
-      const { cep, retries } = JSON.parse(message.content.toString());
-      const response = await fetchFromApi(cep, retries);
+      const data = JSON.parse(message.content.toString());
+      if (data.end) {
+        channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify({ end: true })));
+      } else {
+        const { cep, retries } = data;
+        const response = await fetchFromApi(cep, retries);
 
-      // If API request was successful, add the result to the write queue
-      if (response) {
-        channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify(response)));
+        // If API request was successful, add the result to the write queue
+        if (response) {
+          channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify(response)));
+        }
       }
       channel.ack(message);
     });
   }
 }
 
-// Consume the write queue and write to database
 async function consumeWriteQueue() {
   const CONSUMER_COUNT = 10;
   let batch: Array<any> = []
 
   for (let i = 0; i < CONSUMER_COUNT; i++) {
     channel.consume('writeQueue', async (message: any) => {
-      const cep: number = JSON.parse(message.content.toString());
-      console.log("W", cep)
-      batch.push(prisma.ceps.create({ data: { cep: cep } }));
-
-      if (batch.length >= 128) {
+      const data = JSON.parse(message.content.toString());
+      if (data.end) {
         try {
           await prisma.$transaction(batch);
-          console.log("Batch written")
+          console.log("Final batch written")
         } catch (error: any) {
           console.log('prisma error', error)
         }
         batch = [];
-      }
+      } else {
+        const cep: number = data;
+        console.log("W", cep)
+        batch.push(prisma.ceps.create({ data: { cep: cep } }));
 
-      const queueInfo = await channel.assertQueue('writeQueue');
-      if (queueInfo.messageCount === 0 && batch.length > 0) {
-        try {
-          await prisma.$transaction(batch);
-          console.log("Remaining batch written")
-        } catch (error: any) {
-          console.log('prisma error', error)
+        if (batch.length >= 128) {
+          try {
+            await prisma.$transaction(batch);
+            console.log("Batch written")
+          } catch (error: any) {
+            console.log('prisma error', error)
+          }
+          batch = [];
         }
-        batch = [];
       }
-
       channel.ack(message);
     });
   }
 }
-
 
 // Main function to start the script
 async function main() {
