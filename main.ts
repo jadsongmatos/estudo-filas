@@ -13,12 +13,11 @@ let connection: any;
 
 // Function to read the ceps.bin file and get the biggest zip code
 async function getStartingZip() {
-  return 2300000
+  return 2334060
 }
 
 async function fetchFromApi(cep: number, retries: number) {
   const paddedCep = cep.toString().padStart(8, "0");
-
   try {
     const response = await axios(`${API_URL}${paddedCep}`);
     // Successful request
@@ -33,7 +32,11 @@ async function fetchFromApi(cep: number, retries: number) {
       return false
     } else {
       if (retries > 0) {
-        channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ cep: cep, retries: retries - 1 })));
+        if (channel && channel.sendToQueue) {
+          channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ cep: cep, retries: retries - 1 })));
+        } else {
+          setTimeout(() => fetchFromApi(cep, retries), 1000);
+        }
       } else {
         console.log('axios error', cep, error?.code)
       }
@@ -48,15 +51,20 @@ async function addToSearchQueue() {
 
   // Recursive function to add CEPs to the queue
   const addNextCepToQueue = () => {
-    if (cep < MAX_CEP) {
-      channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ cep: cep, retries: 3 })));
-      if (cep % 10000 == 0) {
-        console.log("CEP", cep)
+    if (channel && channel.sendToQueue) {
+      if (cep < MAX_CEP) {
+        channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ cep: cep, retries: 3 })));
+        if (cep % 10000 == 0) {
+          console.log("CEP", cep)
+        }
+        cep++;
+        setImmediate(addNextCepToQueue)
+      } else {
+        channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ end: true })));
       }
-      cep++;
-      addNextCepToQueue()
     } else {
-      channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ end: true })));
+      cep--
+      setTimeout(addNextCepToQueue, 1000);
     }
   };
 
@@ -69,17 +77,29 @@ async function consumeSearchQueue() {
     channel.consume('searchQueue', async (message: any) => {
       const data = JSON.parse(message.content.toString());
       if (data.end) {
-        channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify({ end: true })));
+        if (channel && channel.sendToQueue) {
+          channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify({ end: true })));
+        } else {
+          setTimeout(() => channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify({ end: true }))), 1000);
+        }
       } else {
         const { cep, retries } = data;
         const response = await fetchFromApi(cep, retries);
 
         // If API request was successful, add the result to the write queue
         if (response) {
-          channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify(response)));
+          if (channel && channel.sendToQueue) {
+            channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify(response)));
+          } else {
+            setTimeout(() => channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify(response))), 1000);
+          }
         }
       }
-      channel.ack(message);
+      if (channel && channel.ack) {
+        channel.ack(message);
+      } else {
+        setTimeout(() => channel.ack(message), 1000);
+      }
     });
   }
 }
@@ -98,10 +118,9 @@ async function consumeWriteQueue() {
       batch = [];
     } else {
       const cep: number = data;
-      console.log("W", cep)
       batch.push(prisma.ceps.create({ data: { cep: cep } }));
 
-      if (batch.length >= 128) {
+      if (batch.length >= 64) {
         try {
           await prisma.$transaction(batch);
           console.log("Batch written")
@@ -111,9 +130,12 @@ async function consumeWriteQueue() {
         batch = [];
       }
     }
-    channel.ack(message);
+    if (channel && channel.ack) {
+      channel.ack(message);
+    } else {
+      setTimeout(() => channel.ack(message), 1000);
+    }
   });
-
 }
 
 async function createChannel() {
