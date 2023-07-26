@@ -168,7 +168,7 @@ async function createChannel() {
 async function connectRabbitMQ() {
   try {
     connection = await amqp.connect(RABBITMQ_URL, {
-      timeout: 5000,
+      timeout: 30000,
     });
     connection.on('close', () => {
       console.error('RabbitMQ connection closed, reconnecting...');
