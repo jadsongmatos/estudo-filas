@@ -7,7 +7,7 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./ceps3.db"
+  url      = "file:./ceps.db?busyTimeout=5000"
 }
 
 model Ceps {
