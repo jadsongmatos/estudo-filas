@@ -2,7 +2,7 @@ import amqp from "amqplib";
 import axios from "axios";
 import { PrismaClient } from "@prisma/client";
 
-const CONSUMER_COUNT = 15;
+const CONSUMER_COUNT = 32;
 const MAX_CEP = 99999999;
 const API_URL = "https://brasilapi.com.br/api/cep/v2/";
 const RABBITMQ_URL = "amqp://localhost";
@@ -13,7 +13,7 @@ let connection: any;
 let n_messages = 0
 // Function to read the ceps.bin file and get the biggest zip code
 async function getStartingZip() {
-  return 2565422
+  return 2639000
 }
 
 async function fetchFromApi(cep: number, retries: number) {
@@ -56,9 +56,8 @@ async function addToSearchQueue() {
   const addNextCepToQueue = () => {
     if (channel && channel.sendToQueue) {
       if (cep < MAX_CEP) {
-        if (n_messages > 1024) {
-          console.log("CEP", cep);
-          setTimeout(addNextCepToQueue, 100);
+        if (n_messages > 512) {
+          setTimeout(addNextCepToQueue, 200);
         } else {
           channel.sendToQueue(
             "searchQueue",
@@ -106,7 +105,6 @@ async function consumeSearchQueue() {
       } else {
         const { cep, retries } = data;
         const response = await fetchFromApi(cep, retries);
-
         // If API request was successful, add the result to the write queue
         if (response) {
           if (channel && channel.sendToQueue) {
@@ -151,8 +149,8 @@ async function consumeWriteQueue() {
     } else {
       const cep: number = data;
       batch.push(prisma.ceps.create({ data: { cep: cep } }));
-
       if (batch.length >= 128) {
+        console.log("CEP", cep);
         try {
           await prisma.$transaction(batch);
           console.log("Batch written");
@@ -206,7 +204,7 @@ async function createChannel() {
 async function connectRabbitMQ() {
   try {
     connection = await amqp.connect(RABBITMQ_URL, {
-      timeout: 30000,
+      timeout: 1800000,
     });
     connection.on("close", () => {
       console.error("RabbitMQ connection closed, reconnecting...");
