@@ -1,8 +1,8 @@
-import amqp from 'amqplib';
+import amqp from "amqplib";
 import axios from "axios";
 import { PrismaClient } from "@prisma/client";
 
-const CONSUMER_COUNT = 10;
+const CONSUMER_COUNT = 15;
 const MAX_CEP = 99999999;
 const API_URL = "https://brasilapi.com.br/api/cep/v2/";
 const RABBITMQ_URL = "amqp://localhost";
@@ -13,7 +13,7 @@ let connection: any;
 
 // Function to read the ceps.bin file and get the biggest zip code
 async function getStartingZip() {
-  return 2334060
+  return 0;
 }
 
 async function fetchFromApi(cep: number, retries: number) {
@@ -22,25 +22,28 @@ async function fetchFromApi(cep: number, retries: number) {
     const response = await axios(`${API_URL}${paddedCep}`);
     // Successful request
     if (response.status !== 404) {
-      console.log("S", cep)
-      return cep
+      console.log("S", cep);
+      return cep;
     }
-    return false
+    return false;
   } catch (error: any) {
     // Handle errors
     if (error.response && error.response.status === 404) {
-      return false
+      return false;
     } else {
       if (retries > 0) {
         if (channel && channel.sendToQueue) {
-          channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ cep: cep, retries: retries - 1 })));
+          channel.sendToQueue(
+            "searchQueue",
+            Buffer.from(JSON.stringify({ cep: cep, retries: retries - 1 }))
+          );
         } else {
           setTimeout(() => fetchFromApi(cep, retries), 1000);
         }
       } else {
-        console.log('axios error', cep, error?.code)
+        console.log("axios error", cep, error?.code);
       }
-      return false
+      return false;
     }
   }
 }
@@ -53,17 +56,23 @@ async function addToSearchQueue() {
   const addNextCepToQueue = () => {
     if (channel && channel.sendToQueue) {
       if (cep < MAX_CEP) {
-        channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ cep: cep, retries: 3 })));
+        channel.sendToQueue(
+          "searchQueue",
+          Buffer.from(JSON.stringify({ cep: cep, retries: 3 }))
+        );
         if (cep % 10000 == 0) {
-          console.log("CEP", cep)
+          console.log("CEP", cep);
         }
         cep++;
-        setImmediate(addNextCepToQueue)
+        setTimeout(addNextCepToQueue, 100);
+        //setImmediate(addNextCepToQueue);
       } else {
-        channel.sendToQueue('searchQueue', Buffer.from(JSON.stringify({ end: true })));
+        channel.sendToQueue(
+          "searchQueue",
+          Buffer.from(JSON.stringify({ end: true }))
+        );
       }
     } else {
-      cep--
       setTimeout(addNextCepToQueue, 1000);
     }
   };
@@ -74,13 +83,23 @@ async function addToSearchQueue() {
 
 async function consumeSearchQueue() {
   for (let i = 0; i < CONSUMER_COUNT; i++) {
-    channel.consume('searchQueue', async (message: any) => {
+    channel.consume("searchQueue", async (message: any) => {
       const data = JSON.parse(message.content.toString());
       if (data.end) {
         if (channel && channel.sendToQueue) {
-          channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify({ end: true })));
+          channel.sendToQueue(
+            "writeQueue",
+            Buffer.from(JSON.stringify({ end: true }))
+          );
         } else {
-          setTimeout(() => channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify({ end: true }))), 1000);
+          setTimeout(
+            () =>
+              channel.sendToQueue(
+                "writeQueue",
+                Buffer.from(JSON.stringify({ end: true }))
+              ),
+            1000
+          );
         }
       } else {
         const { cep, retries } = data;
@@ -89,9 +108,19 @@ async function consumeSearchQueue() {
         // If API request was successful, add the result to the write queue
         if (response) {
           if (channel && channel.sendToQueue) {
-            channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify(response)));
+            channel.sendToQueue(
+              "writeQueue",
+              Buffer.from(JSON.stringify(response))
+            );
           } else {
-            setTimeout(() => channel.sendToQueue('writeQueue', Buffer.from(JSON.stringify(response))), 1000);
+            setTimeout(
+              () =>
+                channel.sendToQueue(
+                  "writeQueue",
+                  Buffer.from(JSON.stringify(response))
+                ),
+              1000
+            );
           }
         }
       }
@@ -105,15 +134,15 @@ async function consumeSearchQueue() {
 }
 
 async function consumeWriteQueue() {
-  let batch: Array<any> = []
-  channel.consume('writeQueue', async (message: any) => {
+  let batch: Array<any> = [];
+  channel.consume("writeQueue", async (message: any) => {
     const data = JSON.parse(message.content.toString());
     if (data.end) {
       try {
         await prisma.$transaction(batch);
-        console.log("Final batch written")
+        console.log("Final batch written");
       } catch (error: any) {
-        console.log('prisma error', error)
+        console.log("prisma error", error);
       }
       batch = [];
     } else {
@@ -123,11 +152,14 @@ async function consumeWriteQueue() {
       if (batch.length >= 64) {
         try {
           await prisma.$transaction(batch);
-          console.log("Batch written")
+          console.log("Batch written");
         } catch (error: any) {
-          console.log('prisma error', error)
+          console.log("prisma error", error);
         }
         batch = [];
+        if (global.gc) {
+          global.gc();
+        }
       }
     }
     if (channel && channel.ack) {
@@ -142,25 +174,28 @@ async function createChannel() {
   try {
     channel = await connection.createChannel();
 
-    channel.on('close', () => {
-      console.error('RabbitMQ channel closed, recreating...');
+    channel.on("close", () => {
+      console.error("RabbitMQ channel closed, recreating...");
       setTimeout(createChannel, 1000);
     });
 
-    channel.on('error', (error: any) => {
+    channel.on("error", (error: any) => {
       if (error.message !== "Channel closing") {
         console.error("[AMQP] channel error", error.message);
       }
     });
 
-    await channel.assertQueue('searchQueue');
-    await channel.assertQueue('writeQueue');
+    await channel.assertQueue("searchQueue");
+    await channel.assertQueue("writeQueue");
 
     // Start consuming and adding to the queue in parallel
-    await Promise.all([addToSearchQueue(), consumeSearchQueue(), consumeWriteQueue()]);
-
+    await Promise.all([
+      addToSearchQueue(),
+      consumeSearchQueue(),
+      consumeWriteQueue(),
+    ]);
   } catch (error) {
-    console.error('Failed to create a RabbitMQ channel, retrying...', error);
+    console.error("Failed to create a RabbitMQ channel, retrying...", error);
     setTimeout(createChannel, 1000);
   }
 }
@@ -170,12 +205,12 @@ async function connectRabbitMQ() {
     connection = await amqp.connect(RABBITMQ_URL, {
       timeout: 30000,
     });
-    connection.on('close', () => {
-      console.error('RabbitMQ connection closed, reconnecting...');
+    connection.on("close", () => {
+      console.error("RabbitMQ connection closed, reconnecting...");
       setTimeout(connectRabbitMQ, 1000);
     });
 
-    connection.on('error', (error: any) => {
+    connection.on("error", (error: any) => {
       if (error.message !== "Connection closing") {
         console.error("[AMQP] conn error", error.message);
       }
@@ -187,11 +222,10 @@ async function connectRabbitMQ() {
     });
 
     createChannel();
-
   } catch (error) {
-    console.error('Failed to connect to RabbitMQ, retrying...', error);
+    console.error("Failed to connect to RabbitMQ, retrying...", error);
     setTimeout(connectRabbitMQ, 1000);
   }
 }
 
-connectRabbitMQ()
+connectRabbitMQ();
