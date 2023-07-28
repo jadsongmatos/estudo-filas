@@ -2,7 +2,6 @@ import amqp from "amqplib";
 import { PrismaClient } from "@prisma/client";
 import { Worker } from 'worker_threads';
 
-const CONSUMER_COUNT = 8;
 const MAX_CEP = 99999999;
 const RABBITMQ_URL = "amqp://localhost";
 
@@ -11,30 +10,28 @@ let prisma = new PrismaClient();
 let connection: any;
 let load = true
 
-async function getStartingZip() {
-  return 2070000
+for (let i = 0; i < 64; i++) {
+  const worker = new Worker('./worker-script.ts');
+
+  worker.on('message', (msg) => {
+    if (msg.error) {
+      console.error(msg.error);
+    }
+  });
+
+  worker.on('error', (err) => {
+    console.error(err);
+  });
+
+  worker.on('exit', (code) => {
+    if (code !== 0) {
+      console.error(`Worker stopped with exit code ${code}`);
+    }
+  });
 }
 
-async function consumeSearchQueue() {
-  for (let i = 0; i < CONSUMER_COUNT; i++) {
-    const worker = new Worker('./worker-script.ts');
-
-    worker.on('message', (msg) => {
-      if (msg.error) {
-        console.error(msg.error);
-      }
-    });
-
-    worker.on('error', (err) => {
-      console.error(err);
-    });
-
-    worker.on('exit', (code) => {
-      if (code !== 0) {
-        console.error(`Worker stopped with exit code ${code}`);
-      }
-    });
-  }
+async function getStartingZip() {
+  return 3110000
 }
 
 async function addToSearchQueue() {
@@ -103,7 +100,6 @@ async function createChannel() {
     // Start consuming and adding to the queue in parallel
     await Promise.all([
       addToSearchQueue(),
-      consumeSearchQueue(),
       consumeWriteQueue(),
     ]);
 

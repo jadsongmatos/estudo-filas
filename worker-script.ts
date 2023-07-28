@@ -1,4 +1,3 @@
-const { parentPort } = require('worker_threads');
 import amqp from "amqplib";
 import axios from "axios";
 
@@ -38,10 +37,11 @@ async function fetchFromApi(cep: number, retries: number) {
   }
 }
 
-parentPort.on('message', async () => {
+async function worker() {
   const connection = await amqp.connect(RABBITMQ_URL);
   channel = await connection.createChannel();
-  channel.prefetch(8);
+  channel.prefetch(4);
+  console.log("worker")
   channel.consume("searchQueue", async (message: any) => {
     const data = JSON.parse(message.content.toString());
     const { cep, retries } = data;
@@ -55,4 +55,6 @@ parentPort.on('message', async () => {
     }
     channel.ack(message);
   });
-});
+}
+
+worker()
