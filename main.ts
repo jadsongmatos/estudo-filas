@@ -1,50 +1,39 @@
 import amqp from "amqplib";
-import axios from "axios";
 import { PrismaClient } from "@prisma/client";
+import { Worker } from 'worker_threads';
 
-const CONSUMER_COUNT = 32;
+const CONSUMER_COUNT = 8;
 const MAX_CEP = 99999999;
-const API_URL = "https://brasilapi.com.br/api/cep/v2/";
 const RABBITMQ_URL = "amqp://localhost";
 
 let channel: any;
 let prisma = new PrismaClient();
 let connection: any;
-let n_messages = 0
-// Function to read the ceps.bin file and get the biggest zip code
+let load = true
+
 async function getStartingZip() {
-  return 2639000
+  return 2070000
 }
 
-async function fetchFromApi(cep: number, retries: number) {
-  const paddedCep = cep.toString().padStart(8, "0");
-  try {
-    const response = await axios.get(`${API_URL}${paddedCep}`);
-    // Successful request
-    if (response.status !== 404) {
-      console.log("S", cep);
-      return cep;
-    }
-    return false;
-  } catch (error: any) {
-    // Handle errors
-    if (error.response && error.response.status === 404) {
-      return false;
-    } else {
-      if (retries > 0) {
-        if (channel && channel.sendToQueue) {
-          channel.sendToQueue(
-            "searchQueue",
-            Buffer.from(JSON.stringify({ cep: cep, retries: retries - 1 }))
-          );
-        } else {
-          setTimeout(() => fetchFromApi(cep, retries), 1000);
-        }
-      } else {
-        console.log("axios error", cep, error?.code);
+async function consumeSearchQueue() {
+  for (let i = 0; i < CONSUMER_COUNT; i++) {
+    const worker = new Worker('./worker-script.ts');
+
+    worker.on('message', (msg) => {
+      if (msg.error) {
+        console.error(msg.error);
       }
-      return false;
-    }
+    });
+
+    worker.on('error', (err) => {
+      console.error(err);
+    });
+
+    worker.on('exit', (code) => {
+      if (code !== 0) {
+        console.error(`Worker stopped with exit code ${code}`);
+      }
+    });
   }
 }
 
@@ -52,129 +41,51 @@ async function addToSearchQueue() {
   let cep = await getStartingZip();
   console.log("Starting", cep);
 
-  // Recursive function to add CEPs to the queue
-  const addNextCepToQueue = () => {
-    if (channel && channel.sendToQueue) {
-      if (cep < MAX_CEP) {
-        if (n_messages > 512) {
-          setTimeout(addNextCepToQueue, 200);
-        } else {
-          channel.sendToQueue(
-            "searchQueue",
-            Buffer.from(JSON.stringify({ cep: cep, retries: 3 }))
-          );
-          cep++;
-          setImmediate(addNextCepToQueue);
-        }
-      } else {
-        channel.sendToQueue(
-          "searchQueue",
-          Buffer.from(JSON.stringify({ end: true }))
-        );
-      }
+  const bigLoop = setInterval(() => {
+    if (cep >= MAX_CEP) {
+      clearInterval(bigLoop);
+      load = false
     } else {
-      setTimeout(addNextCepToQueue, 1000);
-    }
-  };
-
-  // Start adding CEPs to the queue
-  addNextCepToQueue();
-}
-
-async function consumeSearchQueue() {
-  for (let i = 0; i < CONSUMER_COUNT; i++) {
-    channel.consume("searchQueue", async (message: any) => {
-      n_messages++
-      const data = JSON.parse(message.content.toString());
-      if (data.end) {
-        if (channel && channel.sendToQueue) {
-          channel.sendToQueue(
-            "writeQueue",
-            Buffer.from(JSON.stringify({ end: true }))
-          );
-        } else {
-          setTimeout(
-            () =>
-              channel.sendToQueue(
-                "writeQueue",
-                Buffer.from(JSON.stringify({ end: true }))
-              ),
-            1000
-          );
-        }
-      } else {
-        const { cep, retries } = data;
-        const response = await fetchFromApi(cep, retries);
-        // If API request was successful, add the result to the write queue
-        if (response) {
-          if (channel && channel.sendToQueue) {
-            channel.sendToQueue(
-              "writeQueue",
-              Buffer.from(JSON.stringify(response))
-            );
-          } else {
-            setTimeout(
-              () =>
-                channel.sendToQueue(
-                  "writeQueue",
-                  Buffer.from(JSON.stringify(response))
-                ),
-              1000
-            );
-          }
-        }
-      }
-      if (channel && channel.ack) {
-        channel.ack(message);
-      } else {
-        setTimeout(() => channel.ack(message), 1000);
-      }
-    });
-  }
-}
-
-async function consumeWriteQueue() {
-  let batch: Array<any> = [];
-  channel.consume("writeQueue", async (message: any) => {
-    n_messages--
-    const data = JSON.parse(message.content.toString());
-    if (data.end) {
-      try {
-        await prisma.$transaction(batch);
-        console.log("Final batch written");
-      } catch (error: any) {
-        console.log("prisma error", error);
-      }
-      batch = [];
-    } else {
-      const cep: number = data;
-      batch.push(prisma.ceps.create({ data: { cep: cep } }));
-      if (batch.length >= 128) {
-        console.log("CEP", cep);
-        try {
-          await prisma.$transaction(batch);
-          console.log("Batch written");
-        } catch (error: any) {
-          console.log("prisma error", error);
-        }
-        batch = [];
+      if (cep % 10000 == 0) {
+        console.log("cep", cep);
         if (global.gc) {
           global.gc();
         }
       }
+      channel.sendToQueue(
+        "searchQueue",
+        Buffer.from(JSON.stringify({ cep: cep, retries: 3 }))
+      );
+      cep++;
     }
-    if (channel && channel.ack) {
-      channel.ack(message);
-    } else {
-      setTimeout(() => channel.ack(message), 1000);
+  }, 0);
+}
+
+async function consumeWriteQueue() {
+  channel.consume("writeQueue", async (message: any) => {
+    const data = JSON.parse(message.content.toString());
+    const cep: number = data;
+    console.log("W", cep)
+
+    try {
+      await prisma.ceps.create({
+        data: {
+          cep
+        }
+      })
+    } catch (error: any) {
+      // Checa se o erro é um erro de chave primária duplicada
+      if (error.code != 'P2002') {
+        console.log("prisma error", error);
+      }
     }
+    channel.ack(message);
   });
 }
 
 async function createChannel() {
   try {
     channel = await connection.createChannel();
-
     channel.on("close", () => {
       console.error("RabbitMQ channel closed, recreating...");
       setTimeout(createChannel, 1000);
@@ -195,6 +106,18 @@ async function createChannel() {
       consumeSearchQueue(),
       consumeWriteQueue(),
     ]);
+
+    return new Promise((resolve, reject) => {
+      const intervalId = setInterval(async () => {
+        const searchQueue = await channel.checkQueue("searchQueue");
+        const writeQueue = await channel.checkQueue("writeQueue");
+        if (searchQueue.messageCount === 0 && writeQueue.messageCount === 0 && load == false) {
+          clearInterval(intervalId);
+          resolve(true);
+        }
+      }, 1000);
+    });
+
   } catch (error) {
     console.error("Failed to create a RabbitMQ channel, retrying...", error);
     setTimeout(createChannel, 1000);
@@ -203,9 +126,8 @@ async function createChannel() {
 
 async function connectRabbitMQ() {
   try {
-    connection = await amqp.connect(RABBITMQ_URL, {
-      timeout: 1800000,
-    });
+    connection = await amqp.connect(RABBITMQ_URL);
+
     connection.on("close", () => {
       console.error("RabbitMQ connection closed, reconnecting...");
       setTimeout(connectRabbitMQ, 1000);
@@ -222,7 +144,17 @@ async function connectRabbitMQ() {
       return setTimeout(connectRabbitMQ, 1000);
     });
 
-    createChannel();
+    createChannel()
+      .then(() => {
+        // Close the connection and exit the process
+        connection.close();
+        console.log("All messages have been processed, exiting...");
+        process.exit(0);
+      })
+      .catch((error) => {
+        console.error("Failed to process all messages, exiting...", error);
+        process.exit(1);
+      });
   } catch (error) {
     console.error("Failed to connect to RabbitMQ, retrying...", error);
     setTimeout(connectRabbitMQ, 1000);
