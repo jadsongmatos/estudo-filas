@@ -2,6 +2,8 @@ version: "3.3"
 services:
   rabbitmq:
     container_name: rabbitmq
+    environment:
+      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbitmq_confirmation_timeout 1800000
     ports:
       - "5672:5672"
       - "15672:15672"

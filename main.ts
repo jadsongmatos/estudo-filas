@@ -31,7 +31,7 @@ for (let i = 0; i < 64; i++) {
 }
 
 async function getStartingZip() {
-  return 3110000
+  return 24740000
 }
 
 async function addToSearchQueue() {
@@ -55,7 +55,7 @@ async function addToSearchQueue() {
       );
       cep++;
     }
-  }, 0);
+  }, 10);
 }
 
 async function consumeWriteQueue() {
@@ -99,7 +99,7 @@ async function createChannel() {
 
     // Start consuming and adding to the queue in parallel
     await Promise.all([
-      addToSearchQueue(),
+      //addToSearchQueue(),
       consumeWriteQueue(),
     ]);
 

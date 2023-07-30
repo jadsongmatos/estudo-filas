@@ -5,6 +5,7 @@
   "main": "main.ts",
   "scripts": {
     "start": "node --expose-gc -r ts-node/register ./main.ts",
+    "carga": "node --expose-gc -r ts-node/register ./carga.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,6 +15,7 @@
     "@prisma/client": "^5.0.0",
     "@types/better-queue": "^3.8.3",
     "@types/make-fetch-happen": "^10.0.1",
+    "amqp-connection-manager": "^4.1.13",
     "amqplib": "^0.10.3",
     "axios": "^1.4.0",
     "better-queue": "^3.8.12",
