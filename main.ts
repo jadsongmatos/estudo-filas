@@ -10,7 +10,7 @@ let prisma = new PrismaClient();
 let connection: any;
 let load = true
 
-for (let i = 0; i < 64; i++) {
+for (let i = 0; i < 32; i++) {
   const worker = new Worker('./worker-script.ts');
 
   worker.on('message', (msg) => {
@@ -28,34 +28,6 @@ for (let i = 0; i < 64; i++) {
       console.error(`Worker stopped with exit code ${code}`);
     }
   });
-}
-
-async function getStartingZip() {
-  return 24740000
-}
-
-async function addToSearchQueue() {
-  let cep = await getStartingZip();
-  console.log("Starting", cep);
-
-  const bigLoop = setInterval(() => {
-    if (cep >= MAX_CEP) {
-      clearInterval(bigLoop);
-      load = false
-    } else {
-      if (cep % 10000 == 0) {
-        console.log("cep", cep);
-        if (global.gc) {
-          global.gc();
-        }
-      }
-      channel.sendToQueue(
-        "searchQueue",
-        Buffer.from(JSON.stringify({ cep: cep, retries: 3 }))
-      );
-      cep++;
-    }
-  }, 10);
 }
 
 async function consumeWriteQueue() {
@@ -158,3 +130,31 @@ async function connectRabbitMQ() {
 }
 
 connectRabbitMQ();
+
+async function getStartingZip() {
+  return 5820000
+}
+
+async function addToSearchQueue() {
+  let cep = await getStartingZip();
+  console.log("Starting", cep);
+
+  const bigLoop = setInterval(() => {
+    if (cep >= MAX_CEP) {
+      clearInterval(bigLoop);
+      load = false
+    } else {
+      if (cep % 10000 == 0) {
+        console.log("cep", cep);
+        if (global.gc) {
+          global.gc();
+        }
+      }
+      channel.sendToQueue(
+        "searchQueue",
+        Buffer.from(JSON.stringify({ cep: cep, retries: 3 }))
+      );
+      cep++;
+    }
+  }, 10);
+}

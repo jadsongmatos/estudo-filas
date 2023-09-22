@@ -1,25 +1,28 @@
 import amqp from "amqplib";
-import axios from "axios";
 
-const API_URL = "https://brasilapi.com.br/api/cep/v2/";
+import cep from 'cep-promise';
+
+//import axios from "axios";
+//const API_URL = "https://brasilapi.com.br/api/cep/v2/";
 const RABBITMQ_URL = "amqp://localhost";
 
 let channel: any;
 
-async function fetchFromApi(cep: number, retries: number) {
-  const paddedCep = cep.toString().padStart(8, "0");
+async function fetchFromApi(requestedCep: number, retries: number) {
+  const paddedCep = requestedCep.toString().padStart(8, "0");
+
   try {
-    const response = await axios.get(`${API_URL}${paddedCep}`);
-    // Successful request
-    if (response.status !== 404) {
-      return cep;
-    }
+    await cep(paddedCep);
+
     return false;
   } catch (error: any) {
-    // Handle errors
-    if (error.response && error.response.status === 404) {
+    if (error.type === 'service_error') {
       return false;
-    } else {
+    }
+
+    if (error.name !== 'CepPromiseError') {
+      console.log("error", error)
+
       if (retries > 0) {
         if (channel && channel.sendToQueue) {
           channel.sendToQueue(
@@ -27,13 +30,19 @@ async function fetchFromApi(cep: number, retries: number) {
             Buffer.from(JSON.stringify({ cep: cep, retries: retries - 1 }))
           );
         } else {
-          setTimeout(() => fetchFromApi(cep, retries), 1000);
+          setTimeout(() => fetchFromApi(requestedCep, retries), 1000);
         }
       } else {
-        console.log("axios error", cep, error?.code);
+        console.log("fetchFromApi error", cep, error?.code);
       }
-      return false;
     }
+
+    if (error.type === 'validation_error') {
+      console.log("error", error)
+      throw error
+    }
+
+    return false;
   }
 }
 
