@@ -71,7 +71,7 @@ async function createChannel() {
 
     // Start consuming and adding to the queue in parallel
     await Promise.all([
-      //addToSearchQueue(),
+      addToSearchQueue(),
       consumeWriteQueue(),
     ]);
 

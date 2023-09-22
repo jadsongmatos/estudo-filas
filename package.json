@@ -5,6 +5,7 @@
   "main": "main.ts",
   "scripts": {
     "start": "node --expose-gc -r ts-node/register ./main.ts",
+    "sem_fila": "node --expose-gc -r ts-node/register ./sem_fila.ts",
     "carga": "node --expose-gc -r ts-node/register ./carga.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -21,6 +22,7 @@
     "better-queue": "^3.8.12",
     "better-queue-sqlite": "^1.0.7",
     "cep-promise": "^4.4.0",
+    "fastq": "^1.15.0",
     "make-fetch-happen": "^13.0.0",
     "sqlite3": "^5.1.6",
     "ts-node": "^10.9.1"
