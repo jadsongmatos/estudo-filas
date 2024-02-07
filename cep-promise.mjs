@@ -1,9 +1,8 @@
 import { PrismaClient } from "@prisma/client";
 import cep from "cep-promise";
-//const process = import.meta.require('process');
 
 const MAX_CEP = 99999999;
-const batchSize = 1000;
+const BATCH_SIZE = 1000;
 const prisma = new PrismaClient();
 
 async function fetchCepInfo(requestedCep) {
@@ -53,8 +52,8 @@ process.on("SIGINT", function () {
 async function processCEPs() {
   const currentCep = 7437496;
   try {
-    for (let i = currentCep; i <= MAX_CEP; i += batchSize - 1) {
-      const promises = Array.from({ length: batchSize }, (_, j) =>
+    for (let i = currentCep; i <= MAX_CEP; i += BATCH_SIZE - 1) {
+      const promises = Array.from({ length: BATCH_SIZE }, (_, j) =>
         processCEP(i + j)
       );
       await Promise.all(promises);

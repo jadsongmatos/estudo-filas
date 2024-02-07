@@ -2,7 +2,7 @@ import { PrismaClient } from "@prisma/client";
 import cep from "cep-promise";
 
 const MAX_CEP = 99999999;
-const batchSize = 1000;
+const batchSize = 300;
 const prisma = new PrismaClient();
 
 async function fetchCepInfo(requestedCep) {
@@ -50,7 +50,7 @@ process.on("SIGINT", function () {
 });
 
 async function processCEPs() {
-  const currentCep = 0;
+  const currentCep = 4106292;
   try {
     for (let i = currentCep; i <= MAX_CEP; i += batchSize) {
       const promises = [];
@@ -60,6 +60,7 @@ async function processCEPs() {
 
       await Promise.all(promises);
       console.log("cep", i);
+      //setImmediate(global.gc);
     }
   } catch (error) {
     console.error("Error processing CEPs: ", error);
